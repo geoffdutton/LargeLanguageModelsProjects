@@ -1,19 +1,17 @@
 #Import All the Required Libraries
+import base64
+from io import BytesIO
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
 import os
+import PyPDF2
 from dotenv import load_dotenv
 load_dotenv()
 
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-
-#Load the Gemini Pro Vision Model
-model = genai.GenerativeModel('gemini-pro-vision')
-
-def get_gemini_respone(input_prompt, image, user_input_prompt):
-    response = model.generate_content([input_prompt, image[0], user_input_prompt])
-    return response.text
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+assert len(GOOGLE_API_KEY) > 0, "Please set the GOOGLE_API_KEY in the .env file"
+genai.configure(api_key=GOOGLE_API_KEY)
 
 def input_image_bytes(uploaded_file):
     if uploaded_file is not None:
@@ -29,21 +27,68 @@ def input_image_bytes(uploaded_file):
     else:
         raise FileNotFoundError("No File Uploaded")
 
+def extract_text_from_pdf(uploaded_file):
+    uploaded_file = BytesIO(uploaded_file.getvalue())
+    # Create a PdfFileReader object
+    pdf_reader = PyPDF2.PdfReader(uploaded_file)
+    text = ''
+    for page_num in range(len(pdf_reader.pages)):
+        page_obj: PyPDF2.PageObject = pdf_reader.pages[page_num]
+        text += page_obj.extract_text()
+    return text
+
+
+import pprint
+for model in genai.list_models():
+    pprint.pprint(model.name)
+
+# Load the appropriate Gemini model based on the file type
+def load_gemini_model(file_type):
+    if file_type == "application/pdf":
+        return genai.GenerativeModel('models/gemini-pro')
+    else:
+        return genai.GenerativeModel('models/gemini-pro-vision')
+
+# Get response from Gemini based on the model
+def get_gemini_response(model, input_prompt, content, user_input_prompt):
+    if isinstance(content, str):  # Assuming text content for PDF
+        response = model.generate_content([input_prompt, content, user_input_prompt])
+    else:  # Assuming image content
+        response = model.generate_content([input_prompt, content[0], user_input_prompt])
+    return response.text
+
 # Initialize the Streamlit App
 st.set_page_config(page_title="MultiLanguage Invoice Extractor")
 input_prompt = """
 You are an expert in understanding invoices. Please try to answer the question using the information from the uploaded
 invoice.
 """
-user_input_prompt = st.text_input("User Input Prompt", key="input")
-upload_image_file = st.file_uploader("Choice an Image of the Invoice", type=["jpg", "jpeg", "png"])
+
+user_input_prompt = st.text_input("What would you like to know about this document?", key="input")
+upload_image_file = st.file_uploader("Choose an Image or PDF of the Invoice", type=["jpg", "jpeg", "png", "pdf"])
+
 if upload_image_file is not None:
-    image = Image.open(upload_image_file)
-    st.image(image, caption = "Uploaded Image", use_column_width=True)
+    model = load_gemini_model(upload_image_file.type)
+    if upload_image_file.type == "application/pdf":
+        text = extract_text_from_pdf(uploaded_file=upload_image_file)
+            # Convert the file to a data URL
+        b64 = base64.b64encode(upload_image_file.getvalue()).decode()
+        pdf_url = f"data:application/pdf;base64,{b64}"
+        # Create an iframe with the data URL as the source
+        st.markdown(f'<iframe src="{pdf_url}" width="700" height="700"></iframe>', unsafe_allow_html=True)
+        st.write(text)
+        # st.download_button("Download PDF", upload_image_file.getvalue(), file_name=upload_image_file.name)
+    else:
+        image = Image.open(upload_image_file)
+        st.image(image, caption="Uploaded Image", use_column_width=True)
 
 submit = st.button("Find the Answer from the Invoice")
 if submit:
-    input_image_data = input_image_bytes(upload_image_file)
-    response = get_gemini_respone(input_prompt, input_image_data, user_input_prompt)
+    model = load_gemini_model(upload_image_file.type)
+    if upload_image_file.type == "application/pdf":
+        input_content = extract_text_from_pdf(upload_image_file)  # Assuming this returns the text as a string
+    else:
+        input_content = input_image_bytes(upload_image_file)  # Image data
+    response = get_gemini_response(model, input_prompt, input_content, user_input_prompt)
     st.subheader("Response")
     st.write(response)
