@@ -37,11 +37,6 @@ def extract_text_from_pdf(uploaded_file):
         text += page_obj.extract_text()
     return text
 
-
-import pprint
-for model in genai.list_models():
-    pprint.pprint(model.name)
-
 # Load the appropriate Gemini model based on the file type
 def load_gemini_model(file_type):
     if file_type == "application/pdf":
@@ -60,15 +55,33 @@ def get_gemini_response(model, input_prompt, content, user_input_prompt):
 # Initialize the Streamlit App
 st.set_page_config(page_title="MultiLanguage Invoice Extractor")
 input_prompt = """
-You are an expert in understanding invoices. Please try to answer the question using the information from the uploaded
-invoice.
+You are an expert in understanding all sorts of documents such as invocies, forms, 
+financials, images, etc. Please try to answer the question using the information 
+from the uploaded document.
 """
+upload_image_file = st.file_uploader("Choose an Image or PDF of the document", type=["jpg", "jpeg", "png", "pdf"])
 
 user_input_prompt = st.text_input("What would you like to know about this document?", key="input")
-upload_image_file = st.file_uploader("Choose an Image or PDF of the Invoice", type=["jpg", "jpeg", "png", "pdf"])
+submit = st.button("Ask your question")
+
+def write_model_response(upload_image_file, user_prompt=user_input_prompt):
+    model = load_gemini_model(upload_image_file.type)
+    if upload_image_file.type == "application/pdf":
+        input_content = extract_text_from_pdf(upload_image_file)  # Assuming this returns the text as a string
+    else:
+        input_content = input_image_bytes(upload_image_file)  # Image data
+    response = get_gemini_response(model, input_prompt, input_content, user_prompt)
+    st.subheader("Response")
+    st.write(response)
+
+if submit:
+    write_model_response(upload_image_file)
+
+                         
 
 if upload_image_file is not None:
     model = load_gemini_model(upload_image_file.type)
+    suggestions = write_model_response(upload_image_file, user_prompt="Suggest 3 questions to ask about this document")
     if upload_image_file.type == "application/pdf":
         text = extract_text_from_pdf(uploaded_file=upload_image_file)
             # Convert the file to a data URL
@@ -82,13 +95,3 @@ if upload_image_file is not None:
         image = Image.open(upload_image_file)
         st.image(image, caption="Uploaded Image", use_column_width=True)
 
-submit = st.button("Find the Answer from the Invoice")
-if submit:
-    model = load_gemini_model(upload_image_file.type)
-    if upload_image_file.type == "application/pdf":
-        input_content = extract_text_from_pdf(upload_image_file)  # Assuming this returns the text as a string
-    else:
-        input_content = input_image_bytes(upload_image_file)  # Image data
-    response = get_gemini_response(model, input_prompt, input_content, user_input_prompt)
-    st.subheader("Response")
-    st.write(response)
